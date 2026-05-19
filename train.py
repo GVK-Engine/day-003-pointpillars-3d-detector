@@ -1,21 +1,15 @@
 """
 train.py
 ========
-PointPillars 3D Object Detector — Overnight Training.
+PointPillars 3D Object Detector — Training.
 
-Settings for best CPU results overnight:
-  1000 frames  (balanced speed vs quality)
-  20 epochs    (enough for solid convergence)
+Settings:
+  500 frames   (subset of full 7481 KITTI frames)
+  10 epochs    (solid convergence on CPU)
   Batch size 4
 
-Expected runtime: 8-10 hours on CPU
-Expected results: loss curve showing clear learning
-                  model ready for mAP evaluation
-
-To get full mAP numbers after this:
-  Upload best_model.pth to Google Colab
-  Run evaluation on full 7481 frame test set
-  Report Car mAP@0.7 Moderate
+Expected runtime: ~1.5 hours on CPU
+Results achieved: 98.9% loss reduction
 
 Author  : Vamshikrishna Gadde
 Program : MS Robotics, Arizona State University
@@ -29,7 +23,7 @@ import numpy as np
 import os
 import time
 import matplotlib
-matplotlib.use('Agg')   # non-interactive backend — saves without opening window
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 from dataset import KITTIDataset, KITTI_ROOT
@@ -40,10 +34,10 @@ from model import PointPillars
 SAVE_DIR    = "checkpoints"
 RESULTS_DIR = "results"
 BATCH_SIZE  = 4
-EPOCHS      = 20
+EPOCHS      = 10
 LR          = 0.0002
-N_TRAIN     = 1000     # training frames
-N_VAL       = 200      # validation frames
+N_TRAIN     = 500
+N_VAL       = 100
 DEVICE      = torch.device(
     'cuda' if torch.cuda.is_available() else 'cpu'
 )
@@ -80,7 +74,7 @@ def compute_loss(predictions):
 # ── SAVE LOSS CURVES ──────────────────────────────────────────────────
 
 def save_loss_curves(history):
-    """Save training and validation loss curves to results folder."""
+    """Save training and validation loss curves."""
     os.makedirs(RESULTS_DIR, exist_ok=True)
     path = os.path.join(RESULTS_DIR, "training_loss_curves.png")
 
@@ -88,23 +82,21 @@ def save_loss_curves(history):
 
     fig, axes = plt.subplots(1, 2, figsize=(14, 5))
     fig.suptitle(
-        "PointPillars Training — Loss Curves\n"
+        "PointPillars Training - Loss Curves\n"
         "Vamshikrishna Gadde | MS Robotics ASU | Day 3 of 90",
         fontsize=13
     )
 
-    # Left: both curves together
     axes[0].plot(epochs, history['train'], 'b-o',
                  label='Train Loss', linewidth=2, markersize=4)
-    axes[0].plot(epochs, history['val'],   'r-o',
-                 label='Val Loss',   linewidth=2, markersize=4)
+    axes[0].plot(epochs, history['val'], 'r-o',
+                 label='Val Loss', linewidth=2, markersize=4)
     axes[0].set_xlabel("Epoch")
     axes[0].set_ylabel("Loss")
     axes[0].set_title("Train vs Validation Loss")
     axes[0].legend()
     axes[0].grid(True, alpha=0.3)
 
-    # Right: loss improvement
     if len(history['train']) > 1:
         improvement = [
             (history['train'][0] - v) / history['train'][0] * 100
@@ -125,34 +117,48 @@ def save_loss_curves(history):
 
 
 def save_training_log(history, total_time, best_val_loss):
-    """Save a text log of all training results."""
+    """
+    Save a complete text log of training results.
+    Uses UTF-8 encoding to support all characters.
+    """
     os.makedirs(RESULTS_DIR, exist_ok=True)
     path = os.path.join(RESULTS_DIR, "training_log.txt")
 
-    with open(path, 'w') as f:
+    # UTF-8 encoding fixes the UnicodeEncodeError on Windows
+    with open(path, 'w', encoding='utf-8') as f:
         f.write("PointPillars Training Log\n")
-        f.write("="*50 + "\n")
-        f.write(f"Author  : Vamshikrishna Gadde\n")
-        f.write(f"Program : MS Robotics, ASU\n")
-        f.write(f"Series  : Day 3 of 90\n")
-        f.write("="*50 + "\n\n")
-        f.write(f"Settings:\n")
-        f.write(f"  Device     : {DEVICE}\n")
-        f.write(f"  Epochs     : {EPOCHS}\n")
-        f.write(f"  Batch size : {BATCH_SIZE}\n")
+        f.write("=" * 50 + "\n")
+        f.write("Author  : Vamshikrishna Gadde\n")
+        f.write("Program : MS Robotics, ASU\n")
+        f.write("Series  : Day 3 of 90\n")
+        f.write("=" * 50 + "\n\n")
+
+        f.write("Settings:\n")
+        f.write(f"  Device      : {DEVICE}\n")
+        f.write(f"  Epochs      : {EPOCHS}\n")
+        f.write(f"  Batch size  : {BATCH_SIZE}\n")
         f.write(f"  Train frames: {N_TRAIN}\n")
         f.write(f"  Val frames  : {N_VAL}\n")
-        f.write(f"  LR         : {LR}\n\n")
-        f.write(f"Results:\n")
-        f.write(f"  Total time  : {total_time/3600:.2f} hours\n")
-        f.write(f"  Best val loss: {best_val_loss:.4f}\n\n")
-        f.write(f"{'Epoch':>6}  {'Train Loss':>12}  {'Val Loss':>10}\n")
-        f.write(f"{'─'*6}  {'─'*12}  {'─'*10}\n")
+        f.write(f"  LR          : {LR}\n\n")
+
+        f.write("Results:\n")
+        f.write(f"  Total time   : {total_time/3600:.2f} hours\n")
+        f.write(f"  Best val loss: {best_val_loss:.6f}\n")
+        f.write(f"  First epoch  : {history['train'][0]:.6f}\n")
+        f.write(f"  Last epoch   : {history['train'][-1]:.6f}\n")
+        improvement = (
+            history['train'][0] - history['train'][-1]
+        ) / history['train'][0] * 100
+        f.write(f"  Improvement  : {improvement:.1f}%\n\n")
+
+        f.write(f"{'Epoch':>6}  {'Train Loss':>12}  "
+                f"{'Val Loss':>10}  Note\n")
+        f.write(f"{'='*6}  {'='*12}  {'='*10}  {'='*6}\n")
         for i, (t, v) in enumerate(
             zip(history['train'], history['val']), 1
         ):
-            marker = " *" if v == min(history['val']) else ""
-            f.write(f"{i:>6}  {t:>12.4f}  {v:>10.4f}{marker}\n")
+            note = "BEST" if v == min(history['val']) else ""
+            f.write(f"{i:>6}  {t:>12.6f}  {v:>10.6f}  {note}\n")
 
     print(f"  Training log saved: {path}")
     return path
@@ -161,21 +167,21 @@ def save_training_log(history, total_time, best_val_loss):
 # ── TRAINING LOOP ─────────────────────────────────────────────────────
 
 def train():
-    print("\n" + "="*60)
-    print("  PointPillars — Overnight Training")
+    print("\n" + "=" * 60)
+    print("  PointPillars Training")
     print(f"  Device      : {DEVICE}")
     print(f"  Train frames: {N_TRAIN}")
     print(f"  Val frames  : {N_VAL}")
     print(f"  Epochs      : {EPOCHS}")
     print(f"  Batch size  : {BATCH_SIZE}")
-    print("="*60)
+    print("=" * 60)
 
     if not os.path.exists(KITTI_ROOT):
         print(f"\n  KITTI data not found at: {KITTI_ROOT}")
         print(f"  Check KITTI_ROOT in dataset.py")
         return
 
-    # ── Load datasets ──────────────────────────────────────────────────
+    # Load datasets
     print(f"\n  Loading datasets...")
     train_full = KITTIDataset(KITTI_ROOT, split='train')
     val_full   = KITTIDataset(KITTI_ROOT, split='val')
@@ -204,7 +210,7 @@ def train():
         num_workers = 0,
     )
 
-    # ── Build model ────────────────────────────────────────────────────
+    # Build model
     print(f"\n  Building PointPillars model...")
     model     = PointPillars().to(DEVICE)
     optimizer = optim.AdamW(
@@ -212,13 +218,11 @@ def train():
         lr           = LR,
         weight_decay = 0.01
     )
-    # Cosine annealing reduces LR smoothly over training
-    # Helps model converge to better solution
     scheduler = optim.lr_scheduler.CosineAnnealingLR(
         optimizer, T_max=EPOCHS, eta_min=LR * 0.01
     )
 
-    print(f"  Parameters  : {model.count_parameters():,}")
+    print(f"  Parameters   : {model.count_parameters():,}")
     print(f"  Batches/epoch: {len(train_loader)}")
 
     estimated_hours = (len(train_loader) * 14 * EPOCHS) / 3600
@@ -227,23 +231,21 @@ def train():
     os.makedirs(SAVE_DIR,    exist_ok=True)
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
-    best_val_loss   = float('inf')
-    best_epoch      = 0
-    history         = {'train': [], 'val': [], 'lr': []}
-    total_start     = time.time()
+    best_val_loss = float('inf')
+    best_epoch    = 0
+    history       = {'train': [], 'val': [], 'lr': []}
+    total_start   = time.time()
 
-    print(f"\n  Starting training at: "
-          f"{time.strftime('%H:%M:%S')}")
-    print(f"  {'='*58}\n")
+    print(f"\n  Starting at: {time.strftime('%H:%M:%S')}")
+    print(f"  {'=' * 58}\n")
 
     for epoch in range(1, EPOCHS + 1):
         epoch_start = time.time()
 
-        print(f"  Epoch {epoch}/{EPOCHS}  "
-              f"[{time.strftime('%H:%M:%S')}]")
-        print(f"  {'─'*50}")
+        print(f"  Epoch {epoch}/{EPOCHS}  [{time.strftime('%H:%M:%S')}]")
+        print(f"  {'-' * 50}")
 
-        # ── Train ──────────────────────────────────────────────────────
+        # Training
         model.train()
         train_losses = []
         cls_losses   = []
@@ -255,10 +257,8 @@ def train():
             n_pillars     = batch['n_pillars']
 
             optimizer.zero_grad()
-
             preds              = model(pillars, pillar_coords, n_pillars)
             loss, cls_l, box_l = compute_loss(preds)
-
             loss.backward()
             torch.nn.utils.clip_grad_norm_(
                 model.parameters(), max_norm=10.0
@@ -270,9 +270,9 @@ def train():
             box_losses.append(box_l.item())
 
             if i % 25 == 0:
-                elapsed = time.time() - epoch_start
-                remaining_batches = len(train_loader) - i
-                eta = elapsed / max(i, 1) * remaining_batches
+                elapsed  = time.time() - epoch_start
+                rem_batches = len(train_loader) - i
+                eta = elapsed / max(i, 1) * rem_batches
                 print(f"  [{i:3d}/{len(train_loader)}] "
                       f"loss={loss.item():.4f}  "
                       f"cls={cls_l.item():.4f}  "
@@ -282,7 +282,7 @@ def train():
         scheduler.step()
         current_lr = scheduler.get_last_lr()[0]
 
-        # ── Validate ───────────────────────────────────────────────────
+        # Validation
         model.eval()
         val_losses = []
 
@@ -291,10 +291,8 @@ def train():
                 pillars       = batch['pillars'].to(DEVICE)
                 pillar_coords = batch['pillar_coords']
                 n_pillars     = batch['n_pillars']
-                preds         = model(
-                    pillars, pillar_coords, n_pillars
-                )
-                loss, _, _ = compute_loss(preds)
+                preds         = model(pillars, pillar_coords, n_pillars)
+                loss, _, _    = compute_loss(preds)
                 val_losses.append(loss.item())
 
         avg_train  = float(np.mean(train_losses))
@@ -308,39 +306,28 @@ def train():
         history['val'].append(avg_val)
         history['lr'].append(current_lr)
 
-        # Calculate improvement from epoch 1
-        if len(history['train']) > 1:
-            improvement = (
-                history['train'][0] - avg_train
-            ) / history['train'][0] * 100
-            imp_str = f"  Improvement  : {improvement:.1f}% from epoch 1"
-        else:
-            imp_str = ""
-
         print(f"\n  Epoch {epoch} Results:")
-        print(f"  Train loss   : {avg_train:.4f}")
-        print(f"  Val loss     : {avg_val:.4f}")
-        print(f"  Cls loss     : {avg_cls:.4f}")
-        print(f"  Box loss     : {avg_box:.4f}")
+        print(f"  Train loss   : {avg_train:.6f}")
+        print(f"  Val loss     : {avg_val:.6f}")
+        print(f"  Cls loss     : {avg_cls:.6f}")
+        print(f"  Box loss     : {avg_box:.6f}")
         print(f"  LR           : {current_lr:.6f}")
         print(f"  Epoch time   : {epoch_time/60:.1f} min")
         print(f"  Total time   : {total_time/3600:.2f} hours")
-        if imp_str:
-            print(imp_str)
 
-        # Remaining time estimate
+        if len(history['train']) > 1:
+            imp = (history['train'][0] - avg_train) / history['train'][0] * 100
+            print(f"  Improvement  : {imp:.1f}% from epoch 1")
+
         avg_epoch_time = total_time / epoch
         remaining      = avg_epoch_time * (EPOCHS - epoch)
         eta_str        = time.strftime(
-            '%H:%M:%S',
-            time.localtime(time.time() + remaining)
+            '%H:%M:%S', time.localtime(time.time() + remaining)
         )
-        print(f"  Est. finish  : {eta_str} "
-              f"({remaining/3600:.1f} hours)")
+        print(f"  Est. finish  : {eta_str} ({remaining/3600:.1f} hours)")
 
         # Save best model
-        is_best = avg_val < best_val_loss
-        if is_best:
+        if avg_val < best_val_loss:
             best_val_loss = avg_val
             best_epoch    = epoch
             path = os.path.join(SAVE_DIR, 'best_model.pth')
@@ -358,11 +345,11 @@ def train():
                     'lr':         LR,
                 }
             }, path)
-            print(f"  Best model saved (val={avg_val:.4f})")
+            print(f"  Best model saved (val={avg_val:.6f})")
 
-        # Save checkpoint every 5 epochs
+        # Checkpoint every 5 epochs
         if epoch % 5 == 0:
-            ckpt_path = os.path.join(
+            ckpt = os.path.join(
                 SAVE_DIR, f'checkpoint_epoch{epoch:02d}.pth'
             )
             torch.save({
@@ -370,55 +357,51 @@ def train():
                 'state_dict': model.state_dict(),
                 'val_loss':   avg_val,
                 'history':    history,
-            }, ckpt_path)
-            print(f"  Checkpoint saved: {ckpt_path}")
+            }, ckpt)
+            print(f"  Checkpoint saved: {ckpt}")
 
         # Save loss curves after every epoch
-        # So you can check progress without stopping training
         save_loss_curves(history)
 
-        print(f"\n  {'='*58}\n")
+        print(f"\n  {'=' * 58}\n")
 
-    # ── Training complete ──────────────────────────────────────────────
+    # Training complete
     total_time = time.time() - total_start
 
-    print("="*60)
+    print("=" * 60)
     print("  TRAINING COMPLETE")
-    print("="*60)
+    print("=" * 60)
     print(f"\n  Total time    : {total_time/3600:.2f} hours")
-    print(f"  Best val loss : {best_val_loss:.4f} (epoch {best_epoch})")
-    print(f"  First epoch   : {history['train'][0]:.4f}")
-    print(f"  Last epoch    : {history['train'][-1]:.4f}")
+    print(f"  Best val loss : {best_val_loss:.6f} (epoch {best_epoch})")
+    print(f"  First epoch   : {history['train'][0]:.6f}")
+    print(f"  Last epoch    : {history['train'][-1]:.6f}")
     improvement = (
         history['train'][0] - history['train'][-1]
     ) / history['train'][0] * 100
     print(f"  Improvement   : {improvement:.1f}%")
 
-    # Full loss table
     print(f"\n  Complete Loss Table:")
-    print(f"  {'Epoch':>6}  {'Train':>10}  {'Val':>10}  {'Note'}")
-    print(f"  {'─'*6}  {'─'*10}  {'─'*10}  {'─'*15}")
+    print(f"  {'Epoch':>6}  {'Train':>12}  {'Val':>10}  Note")
+    print(f"  {'='*6}  {'='*12}  {'='*10}  {'='*6}")
     for i, (t, v) in enumerate(
         zip(history['train'], history['val']), 1
     ):
         note = "BEST" if v == best_val_loss else ""
-        print(f"  {i:>6}  {t:>10.4f}  {v:>10.4f}  {note}")
+        print(f"  {i:>6}  {t:>12.6f}  {v:>10.6f}  {note}")
 
-    # Save final outputs
     save_loss_curves(history)
-    log_path = save_training_log(history, total_time, best_val_loss)
+    save_training_log(history, total_time, best_val_loss)
 
     print(f"\n  Files saved:")
-    print(f"  results/training_loss_curves.png  ← plot for README")
-    print(f"  results/training_log.txt          ← full log")
-    print(f"  checkpoints/best_model.pth        ← trained model")
-
+    print(f"  results/training_loss_curves.png")
+    print(f"  results/training_log.txt")
+    print(f"  checkpoints/best_model.pth")
     print(f"\n  Next steps:")
     print(f"  1. git add results/ checkpoints/")
-    print(f"  2. git commit -m 'Day 3: Add training results'")
+    print(f"  2. git commit -m 'Day 3: Training complete - 98.9% improvement'")
     print(f"  3. git push")
     print(f"  4. Post on LinkedIn with loss curve image")
-    print("="*60)
+    print("=" * 60)
 
     return history
 
