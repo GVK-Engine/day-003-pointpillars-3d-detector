@@ -112,7 +112,7 @@ ________________________________________
 Final trained output - loss curves:
 https://drive.google.com/file/d/1zYdT9MppclPmS4nHg3mNLgYatBK_il5I/view?usp=drive_link
 
-Training log (full epoch details):
+Training log (Epoch details):
 https://drive.google.com/file/d/1fGFVJMgmAhVLvFXcHXVJJOIGRPjUOgm5/view?usp=drive_link
 
 Trained model checkpoints:
